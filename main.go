@@ -35,6 +35,7 @@ func main() {
 			&cli.StringFlag{
 				Name:     "flaggio-url",
 				EnvVars:  []string{"FLAGGIO_URL"},
+				Usage:    "Full URL to GraphQL endpoint (eg: https://localhost/query) -- /query is the flaggio default",
 				Required: true,
 			},
 			&cli.StringFlag{
