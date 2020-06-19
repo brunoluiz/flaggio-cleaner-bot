@@ -5,15 +5,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/brunoluiz/flaggio-cleaner-bot/internal/linear"
-	"github.com/brunoluiz/flaggio-cleaner-bot/internal/repo"
-	"github.com/brunoluiz/flaggio-cleaner-bot/internal/worker"
+	"github.com/brunoluiz/flaggio-cleaner-bot/flaggio"
+	"github.com/brunoluiz/flaggio-cleaner-bot/linear"
+	"github.com/brunoluiz/flaggio-cleaner-bot/repo"
+	"github.com/brunoluiz/flaggio-cleaner-bot/worker"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/urfave/cli/v2"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func main() {
@@ -25,16 +24,24 @@ func main() {
 				Name:    "max-age",
 				EnvVars: []string{"MAX_AGE"},
 				Value:   time.Hour * 24 * 5,
+				Usage:   "Max flag age before processing is triggered",
 			},
 			&cli.StringFlag{
-				Name:     "db-dsn",
-				EnvVars:  []string{"DB_DSN"},
+				Name:     "storage-path",
+				EnvVars:  []string{"STORAGE_DSN"},
+				Usage:    "Used to store already processed flags",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "flaggio-url",
+				EnvVars:  []string{"FLAGGIO_URL"},
 				Required: true,
 			},
 			&cli.StringFlag{
 				Name:    "flag-prefix",
 				EnvVars: []string{"FLAG_PREFIX"},
 				Value:   "",
+				Usage:   "Searches for a certain flag prefix -- useful for shared flaggio instances",
 			},
 			&cli.StringFlag{
 				Name:    "linear-token",
@@ -68,9 +75,11 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			return run(c.Context,
+			return run(
+				c.Context,
 				c.Duration("max-age"),
-				c.String("db-dsn"),
+				c.String("storage-path"),
+				c.String("flaggio-url"),
 				c.String("flag-prefix"),
 				c.String("linear-token"),
 				c.String("linear-team"),
@@ -91,7 +100,8 @@ func main() {
 func run(
 	ctx context.Context,
 	maxAge time.Duration,
-	dbDSN string,
+	storagePath string,
+	flaggioURL string,
 	flagPrefix string,
 	linearToken string,
 	linearTeam string,
@@ -103,19 +113,15 @@ func run(
 ) error {
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(dbDSN))
+	processedFlag, err := repo.NewProcessedFlagDisk(storagePath)
 	if err != nil {
 		return err
 	}
-	defer client.Disconnect(ctx)
-
-	if err = client.Ping(ctx, nil); err != nil {
-		return err
-	}
+	defer processedFlag.Close()
 
 	w := worker.New(
-		repo.NewFlagMongo(client.Database("flaggio")),
-		repo.NewProcessedFlagMongo(client.Database("flaggio")),
+		flaggio.New(flaggioURL),
+		processedFlag,
 	)
 
 	triggers := []worker.ProcessOutdatedTrigger{}

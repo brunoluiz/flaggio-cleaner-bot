@@ -3,28 +3,27 @@ package worker
 import (
 	"bytes"
 	"context"
-	"strings"
 	"text/template"
 	"time"
 
-	"github.com/brunoluiz/flaggio-cleaner-bot/internal/linear"
-	"github.com/brunoluiz/flaggio-cleaner-bot/internal/repo"
+	"github.com/brunoluiz/flaggio-cleaner-bot/flaggio"
+	"github.com/brunoluiz/flaggio-cleaner-bot/linear"
+	"github.com/brunoluiz/flaggio-cleaner-bot/repo"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// FlagRepository flags repo
-type FlagRepository interface {
-	FindFlagsByMaxAge(ctx context.Context, maxAge time.Duration) ([]repo.Flag, error)
+// FlaggioClient flags repo
+type FlaggioClient interface {
+	FindFlagsByMaxAge(ctx context.Context, maxAge time.Duration, opts ...flaggio.FindFlagsOpt) ([]flaggio.Flag, error)
 }
 
-// ProcessedFlagsRepository outdated flags repo
+// ProcessedFlagsRepository processed flags repo
 type ProcessedFlagsRepository interface {
-	IsProcessed(ctx context.Context, id primitive.ObjectID) (bool, error)
-	CreateProcessedFlag(ctx context.Context, flag repo.ProcessedFlag) error
+	IsProcessed(ctx context.Context, id string) (bool, error)
+	Save(ctx context.Context, flag repo.ProcessedFlag) error
 }
 
 // LinearClient linear client
@@ -34,20 +33,20 @@ type LinearClient interface {
 
 // Worker defines a worker
 type Worker struct {
-	flags     FlagRepository
+	flags     FlaggioClient
 	processed ProcessedFlagsRepository
 }
 
 // New return a new worker
 func New(
-	flags FlagRepository,
-	outdated ProcessedFlagsRepository,
+	flags FlaggioClient,
+	processed ProcessedFlagsRepository,
 ) *Worker {
-	return &Worker{flags, outdated}
+	return &Worker{flags, processed}
 }
 
 // ProcessOutdatedTrigger Triggers for process outdated
-type ProcessOutdatedTrigger func(ctx context.Context, f repo.Flag) error
+type ProcessOutdatedTrigger func(ctx context.Context, f flaggio.Flag) error
 
 // WithLinearIssueCreation Creates an issue at linear if a flag is outdated
 func WithLinearIssueCreation(
@@ -61,7 +60,7 @@ func WithLinearIssueCreation(
 		return nil, err
 	}
 
-	return func(ctx context.Context, f repo.Flag) error {
+	return func(ctx context.Context, f flaggio.Flag) error {
 		var tpl bytes.Buffer
 		if err := t.Execute(&tpl, f); err != nil {
 			return err
@@ -87,7 +86,7 @@ func WithSlackNotification(
 		return nil, err
 	}
 
-	return func(ctx context.Context, f repo.Flag) error {
+	return func(ctx context.Context, f flaggio.Flag) error {
 		var tpl bytes.Buffer
 		if err := t.Execute(&tpl, f); err != nil {
 			return err
@@ -113,25 +112,20 @@ func (w *Worker) ProcessOutdated(
 		return errors.New("No trigger configured")
 	}
 
-	flags, err := w.flags.FindFlagsByMaxAge(ctx, maxAge)
+	flags, err := w.flags.FindFlagsByMaxAge(ctx, maxAge, flaggio.WithFindFlagsSearchOpt(flagPrefix))
 	if err != nil {
 		return err
 	}
 
 	var errs error
 	for _, f := range flags {
-		hasPrefix := strings.HasPrefix(f.Key, flagPrefix)
-		if !hasPrefix {
-			continue
-		}
-
-		isNotified, err := w.processed.IsProcessed(ctx, f.ID)
+		isProcessed, err := w.processed.IsProcessed(ctx, f.ID)
 		if err != nil {
 			errs = multierror.Append(errs, err)
 			continue
 		}
 
-		if isNotified {
+		if isProcessed {
 			continue
 		}
 
@@ -148,9 +142,10 @@ func (w *Worker) ProcessOutdated(
 			continue
 		}
 
-		if err = w.processed.CreateProcessedFlag(ctx, repo.ProcessedFlag{
-			ID:  f.ID,
-			Key: f.Key,
+		if err = w.processed.Save(ctx, repo.ProcessedFlag{
+			ID:   f.ID,
+			Key:  f.Key,
+			Name: f.Name,
 		}); err != nil {
 			errs = multierror.Append(errs, err)
 			continue
