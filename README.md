@@ -64,7 +64,7 @@ COMMANDS:
 
 GLOBAL OPTIONS:
    --max-age value          Max flag age before processing is triggered (default: 120h0m0s) [$MAX_AGE]
-   --storage-path value     Used to store already processed flags [$STORAGE_DSN]
+   --storage-path value     Used to store already processed flags [$STORAGE_PATH]
    --flaggio-url value       [$FLAGGIO_URL]
    --flag-prefix value      Searches for a certain flag prefix -- useful for shared flaggio instances [$FLAG_PREFIX]
    --linear-token value      [$LINEAR_TOKEN]

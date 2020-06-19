@@ -28,7 +28,7 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:     "storage-path",
-				EnvVars:  []string{"STORAGE_DSN"},
+				EnvVars:  []string{"STORAGE_PATH"},
 				Usage:    "Used to store already processed flags",
 				Required: true,
 			},
